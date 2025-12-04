@@ -640,9 +640,9 @@ void CScrollingLayout::resizeActiveWindow(const Vector2D& delta, eRectCorner cor
     const auto DATA = dataFor(PWINDOW);
 
     if (!DATA) {
-        *PWINDOW->m_realSize =
-            (PWINDOW->m_realSize->goal() + delta)
-                .clamp(PWINDOW->m_ruleApplicator->minSize().valueOr(Vector2D{MIN_WINDOW_SIZE, MIN_WINDOW_SIZE}), PWINDOW->m_ruleApplicator->maxSize().valueOr(Vector2D{INFINITY, INFINITY}));
+        *PWINDOW->m_realSize = (PWINDOW->m_realSize->goal() + delta)
+                                   .clamp(PWINDOW->m_ruleApplicator->minSize().valueOr(Vector2D{MIN_WINDOW_SIZE, MIN_WINDOW_SIZE}),
+                                          PWINDOW->m_ruleApplicator->maxSize().valueOr(Vector2D{INFINITY, INFINITY}));
         PWINDOW->updateWindowDecos();
         return;
     }
