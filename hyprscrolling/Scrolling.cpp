@@ -472,55 +472,65 @@ void CScrollingLayout::applyNodeDataToWindow(SP<SScrollingWindowData> data, bool
 }
 
 void CScrollingLayout::onEnable() {
-    static const auto PCONFWIDTHS = CConfigValue<Hyprlang::STRING>("plugin:hyprscrolling:explicit_column_widths");
+    // 1. Config-Callback für explicit_column_widths
+    static const auto* const PCONFWIDTHS = (Hyprlang::STRING const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprscrolling:explicit_column_widths")->getDataStaticPtr();
 
-    m_configCallback = g_pHookSystem->hookDynamic("configReloaded", [this](void* hk, SCallbackInfo& info, std::any param) {
-        // bitch ass
+    m_configCallback = g_pHookSystem->hookDynamic("configReloaded", [this](void*, SCallbackInfo&, std::any) {
         m_config.configuredWidths.clear();
-
         CConstVarList widths(*PCONFWIDTHS, 0, ',');
         for (auto& w : widths) {
             try {
                 m_config.configuredWidths.emplace_back(std::stof(std::string{w}));
-            } catch (...) { Debug::log(ERR, "scrolling: Failed to parse width {} as float", w); }
+            } catch (...) { Debug::log(ERR, "hyprscrolling: Failed to parse column width: {}", w); }
         }
     });
+    m_configCallback->call(nullptr, SCallbackInfo{}, std::any{});
 
-    m_focusCallback = g_pHookSystem->hookDynamic("activeWindow", [this](void* hk, SCallbackInfo& info, std::any param) {
-        const auto PWINDOW = std::any_cast<PHLWINDOW>(param);
-
-        if (!PWINDOW)
+    // 2. follow_focus über den EINZIGEN Hook, der unter workspacelayout funktioniert: windowFocus
+    HyprlandAPI::registerCallbackDynamic(PHANDLE, "windowFocus", [this](void*, SCallbackInfo&, std::any data) {
+        static const auto* const PFOLLOW = (Hyprlang::INT const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprscrolling:follow_focus")->getDataStaticPtr();
+        if (!*PFOLLOW)
             return;
 
-        static const auto PFOLLOW_FOCUS = CConfigValue<Hyprlang::INT>("plugin:hyprscrolling:follow_focus");
-
-        if (!*PFOLLOW_FOCUS)
+        const auto PWINDOW = std::any_cast<PHLWINDOW>(data);
+        if (!PWINDOW || PWINDOW->isFullscreen() || !PWINDOW->m_isMapped)
             return;
 
-        if (!PWINDOW->m_workspace->isVisible())
+        const auto WSDATA = dataFor(PWINDOW->m_workspace);
+        const auto WDATA  = dataFor(PWINDOW);
+        if (!WSDATA || !WDATA || !WDATA->column.lock())
             return;
 
-        const auto DATA       = dataFor(PWINDOW->m_workspace);
-        const auto WINDOWDATA = dataFor(PWINDOW);
+        const auto               COL = WDATA->column.lock();
 
-        if (!DATA || !WINDOWDATA)
-            return;
+        static const auto* const METHOD = (Hyprlang::INT const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprscrolling:focus_fit_method")->getDataStaticPtr();
+        if (*METHOD == 0)
+            WSDATA->centerCol(COL);
+        else
+            WSDATA->fitCol(COL);
 
-        DATA->fitCol(WINDOWDATA->column.lock());
-        DATA->recalculate();
+        WSDATA->recalculate(true);
     });
 
-    for (auto const& w : g_pCompositor->m_windows) {
-        if (w->m_isFloating || !w->m_isMapped || w->isHidden())
+    // 3. Workspace-Init
+    for (auto& ws : g_pCompositor->getWorkspaces()) {
+        if (!ws || ws->m_bIsSpecialWorkspace)
             continue;
+        dataFor(ws);
+    }
 
+    // 4. Bestehende Fenster
+    for (auto& w : g_pCompositor->m_windows) {
+        if (!w || w->m_isFloating || !w->m_isMapped || w->isHidden())
+            continue;
         onWindowCreatedTiling(w);
     }
 }
 
 void CScrollingLayout::onDisable() {
-    m_workspaceDatas.clear();
+    HyprlandAPI::unregisterCallback(PHANDLE, "windowFocus"); // WICHTIG!
     m_configCallback.reset();
+    m_workspaceDatas.clear();
 }
 
 void CScrollingLayout::onWindowCreatedTiling(PHLWINDOW window, eDirection direction) {
